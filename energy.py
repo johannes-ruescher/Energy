@@ -13,6 +13,7 @@ import pandas as pd
 import networkx as nx
 import random
 from scipy.spatial import distance
+import math
 
 """# Definitions of constants
 
@@ -24,11 +25,27 @@ The paths to the data files are also specified here.
 # ILS parameters 
 
 ALPHA = 0.02
-MAX_ITER = 100     # maximum number of iterations (Stopping criterion of ILS)
-MAX_ITER_NI = 20   # number of iterations without improvement of the objective function (Stopping criterion of ILS)
-MAX_ITER_LS = 10  # maximum number of iterations of the local search operator (Outer loop)
-MAX_SWAPS = 1      # maximum number of swaps of the local search operator (Inner loop)
-NB_SWAPS = 3       # number of swaps in the perturbation operator
+MAX_ITER = 100      # maximum number of iterations (Stopping criterion of ILS)
+MAX_ITER_NI = 50   # number of iterations without improvement of the objective function (Stopping criterion of ILS)
+MAX_ITER_LS = 7     # maximum number of iterations of the local search operator (Outer loop)
+MAX_SWAPS = 1       # maximum number of swaps of the local search operator (Inner loop)
+NB_SWAPS = 1        # number of swaps in the perturbation operator
+BETA = [(1-math.exp(-1/x)) for x in range(1,MAX_ITER)]
+
+# Initial solution
+## "random" for random initial solution
+## "greedy" for greedy initial solution
+INITIAL = "random"
+
+# Perturbation operator
+## "random_to_random" to swap two random nodes
+## "random_to_last" to swap a random node with the last one
+PERTURB = "random_to_random"
+
+# Acceptance criterion variable
+## "Basic" to accept if solution better than at least 1*ALPHA
+## "Annealing" to use annealing acceptance criterion
+ACCEPT = "Annealing"
 
 # Path to data file
 
@@ -236,14 +253,37 @@ def generate_individual(node_num):
     individual = np.ndarray.tolist(np.random.randint(0, high=node_num-1, size=node_num-2, dtype='int'))
     return individual
 
+def generate_greedy(node_num):
+    individual = []
+    for i in range(node_num-2):
+        individual.append(0)
+    print("Individual ",individual)
+    of_best = compute_of(individual,data)
+    of_temp = of_best
+    for j in range(node_num-2):
+        temp = individual
+        for k in range(node_num):
+            temp[j] = k
+            of_temp = compute_of(temp,data)
+            if (of_temp < of_best):
+                individual = temp
+                of_best = of_temp
+    individual[0] = 1
+    return individual
 
 def initial_solution(data):
     """Generate a random solution and calculate its fitness."""
     solution = []
 
     # here we are generating only one initial solution
-    solution.append(generate_individual(data['node_num']))
-
+    if(INITIAL == "random"):
+        solution.append(generate_individual(data['node_num']))
+    elif(INITIAL == "greedy"):
+        solution.append(generate_greedy(data['node_num']))
+        print("Initial solution generated: Greedy")
+    else:
+        print("Wrong initial solution variable")
+        exit()
     value_of = compute_of(solution[0], data)
 
     return solution, value_of
@@ -272,7 +312,7 @@ def local_search(of, sol, data):
     # Main loop local search
     # Local search operators is repeated MAX_ITER_LS times
     
-    while nb_iterations <= MAX_ITER_LS:
+    while nb_iterations < MAX_ITER_LS:
 
         nb_iterations += 1
         print("Local: ", nb_iterations)
@@ -314,7 +354,7 @@ def swap_neighborhood(sol, best_of, data):
         else:
             continue      
     of = best_of
-    n= best_sol
+    n = best_sol
     return of, n
 
 
@@ -333,12 +373,43 @@ def random_swap(sol):
     
     # ----> Put your code here <---
     #TODO random swap
+    list(set(sol))
+    temp_sol= []
+    b= True
+    while(b==True): 
+        y1=random.choice(list(set(sol)))
+        y2=random.choice(list(set(sol)))
+        if y1 != y2:
+            for i in sol:
+                if i == y1:
+                    temp=y2
+                    temp_sol.append(temp)
+                elif i == y2:
+                    temp=y1
+                    temp_sol.append(temp)
+                else:
+                    temp=i
+                    temp_sol.append(temp)
+            b=False
+        else:
+            b=True
+    sol = temp_sol
+    return sol
+
+def perturb_swap(sol):
+    random = np.random.randint(low=1, high=(len(sol)-1))
+    temp = sol[-1]
+    sol[-1] = sol[random]
+    sol[random] = temp
     return sol
 
 # This function is the main body of the perturbation operator, wherein the random_swap function is called
 def perturb(sol, data):
     #TODO perturbation
-    pert_sol=random_swap(sol)
+    if(PERTURB == "random_to_last"):
+        pert_sol = perturb_swap(sol)
+    else:
+        pert_sol = random_swap(sol)
     pert_of = compute_of(pert_sol, data)
     return pert_of, pert_sol
 
@@ -397,18 +468,34 @@ if __name__ == "__main__":
         # print(best_of_pert)
 
         # ******************Aceptance criterion***************************
-        if(best_of_pert < best_of_known):
-            best_known = best_sol_pert
-            best_of_known = best_of_pert
-            improve = 0
-        else:
-            improve += 1
-
-        if (best_of_pert < best_of * (1 + ALPHA)):
-            best_of = best_of_pert
-            best_sol = best_sol_pert
-        else:
-            flag_continue = False
+        
+        if(ACCEPT == "Basic"):
+            if(best_of_pert < best_of_known):
+                best_known = best_sol_pert
+                best_of_known = best_of_pert
+                improve = 0
+            else:
+                improve += 1
+                
+            if (best_of_pert < best_of * (1 + ALPHA)):
+                best_of = best_of_pert
+                best_sol = best_sol_pert
+            else:
+                flag_continue = False
+                
+        if(ACCEPT == "Annealing"):
+            if(best_of_pert < best_of_known):
+                best_known = best_sol_pert
+                best_of_known = best_of_pert
+                improve = 0
+            else:
+                improve += 1
+                
+            if (best_of_pert < best_of * (1+BETA[nb_iterations-1])):
+                best_of = best_of_pert
+                best_sol = best_sol_pert
+            else:
+                flag_continue = False       
 
     print("\n")
     print("After", nb_iterations, " ILS iterations, the best solution is:")
